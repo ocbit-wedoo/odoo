@@ -63,6 +63,7 @@ class ResPartnerBank(models.Model):
     _rec_name = 'acc_number'
     _description = 'Bank Accounts'
     _order = 'sequence, id'
+    _check_company_domain = models.check_company_domain_parent_of
 
     @api.model
     def get_supported_account_types(self):
@@ -87,13 +88,11 @@ class ResPartnerBank(models.Model):
     company_id = fields.Many2one('res.company', 'Company', related='partner_id.company_id', store=True, readonly=True)
     country_code = fields.Char(related='partner_id.country_code', string="Country Code")
 
-    _sql_constraints = [
-    #     (
-    #     'unique_number',
-    #     'unique(sanitized_acc_number, partner_id)',
-    #     'The combination Account Number/Partner must be unique.'
-    # )
-    ]
+    _sql_constraints = [(
+        'unique_number',
+        'unique(sanitized_acc_number, partner_id)',
+        'The combination Account Number/Partner must be unique.'
+    )]
 
     @api.depends('acc_number')
     def _compute_sanitized_acc_number(self):

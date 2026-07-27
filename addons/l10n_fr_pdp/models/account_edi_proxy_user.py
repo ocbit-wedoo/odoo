@@ -75,7 +75,8 @@ DEMO_ENDPOINTS = {  # pdp reports specific endpoints not already mocked by l10n_
     },
     'participant_status': lambda params: {},
     'send_document': lambda params: {
-        'ppf_messages': [{'uid': f'demo_{uuid.uuid4()}', 'flow_id': f'demo_{uuid.uuid4()}'} for _d in params['documents']],
+        'messages': [{'message_uuid': f'demo_{uuid.uuid4()}'} for _d in params['documents']],
+        'ppf_messages': [{'uuid': f'demo_{uuid.uuid4()}', 'flow_id': f'demo_{uuid.uuid4()}'} for _d in params['documents']],
     },
     'pdp_state': lambda params: {},
 }
@@ -122,11 +123,10 @@ class AccountEdiProxyClientUser(models.Model):
     def _call_peppol_proxy(self, endpoint, params=None):
         if (
             self.env.company._get_peppol_edi_mode() == 'demo'
+            and self.proxy_type == 'pdp'
             and (demo_endpoint := DEMO_ENDPOINTS.get(endpoint.split('/')[-1]))
         ):
             self.ensure_one()
-            if self.proxy_type != 'pdp':
-                raise UserError(self.env._('EDI user should be of type PDP'))
             return demo_endpoint(params)
         else:
             return super()._call_peppol_proxy(endpoint, params)
@@ -169,6 +169,7 @@ class AccountEdiProxyClientUser(models.Model):
                     'company_id': company.id,
                     'peppol_identifier': peppol_identifier,
                     'public_key': private_key_sudo._get_public_key_bytes(encoding='pem').decode(),
+                    'auth_url_hash': company.pdp_authentication_uuid,
                 })
             except AccountEdiProxyError as e:
                 raise UserError(e.message)

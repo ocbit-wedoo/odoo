@@ -125,7 +125,7 @@ class HolidaysAllocation(models.Model):
     expiring_carryover_days = fields.Float("The number of carried over days that will expire on carried_over_days_expiration_date")
     carried_over_days_expiration_date = fields.Date("Carried over days expiration date")
     _sql_constraints = [
-        # ('duration_check', "CHECK( ( number_of_days > 0 AND allocation_type='regular') or (allocation_type != 'regular'))", "The duration must be greater than 0."),
+        ('duration_check', "CHECK( ( number_of_days > 0 AND allocation_type='regular') or (allocation_type != 'regular'))", "The duration must be greater than 0."),
     ]
 
     @api.constrains('date_from', 'date_to')
@@ -148,7 +148,7 @@ class HolidaysAllocation(models.Model):
             return _(
                 '%(name)s (%(duration)s hour(s))',
                 name=self.holiday_status_id.name,
-                duration=self.number_of_days * self.employee_id._get_hours_per_day(self.date_from),
+                duration=float_round(self.number_of_days * self.employee_id._get_hours_per_day(self.date_from), precision_digits=2),
             )
         return _(
             '%(name)s (%(duration)s day(s))',

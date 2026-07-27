@@ -1,6 +1,9 @@
+from datetime import datetime
 from markupsafe import Markup
+from lxml import etree
 
 from odoo import _, api, models
+from odoo.addons.account.tools import dict_to_xml
 from odoo.addons.base.models.res_bank import sanitize_account_number
 from odoo.exceptions import UserError, ValidationError
 from odoo.tools import float_compare, float_is_zero, float_repr, format_list, html2plaintext
@@ -8,7 +11,6 @@ from odoo.tools.float_utils import float_round
 from odoo.tools.translate import _lt
 from odoo.tools.misc import clean_context, formatLang, html_escape
 from odoo.tools.xml_utils import find_xml_value
-from datetime import datetime
 
 # -------------------------------------------------------------------------
 # UNIT OF MEASURE
@@ -152,29 +154,29 @@ class FloatFmt(float):
     def __str__(self):
         if not isinstance(self.min_dp, int) or (self.max_dp is not None and not isinstance(self.max_dp, int)):
             return "<FloatFmt()>"
-        self_float = float(self)
-        min_dp_int = int(self.min_dp)
+        # why do we round ?
+        # imagine we have: 0.499 and max_dp = 2.
+        # The best representation for 0.499 with max_dp = 2 is 0.50 not 0.49
+        # rounding with max_dp precision ensure we have the best representation with max_dp decimal places.
+        self_float = float_round(float(self), self.min_dp if self.max_dp is None else self.max_dp)
         if self.max_dp is None:
-            return float_repr(self_float, min_dp_int)
+            return float_repr(self_float, self.min_dp)
         else:
             # Format the float to between self.min_dp and self.max_dp decimal places.
             # We start by formatting to self.max_dp, and then remove trailing zeros,
             # but always keep at least self.min_dp decimal places.
-            max_dp_int = int(self.max_dp)
-            amount_max_dp = float_repr(self_float, max_dp_int)
+            amount_max_dp = float_repr(self_float, self.max_dp)
             num_trailing_zeros = len(amount_max_dp) - len(amount_max_dp.rstrip('0'))
-            return float_repr(self_float, max(max_dp_int - num_trailing_zeros, min_dp_int))
+            return float_repr(self_float, max(self.max_dp - num_trailing_zeros, self.min_dp))
 
     def __repr__(self):
         if not isinstance(self.min_dp, int) or (self.max_dp is not None and not isinstance(self.max_dp, int)):
             return "<FloatFmt()>"
         self_float = float(self)
-        min_dp_int = int(self.min_dp)
         if self.max_dp is None:
-            return f"FloatFmt({self_float!r}, {min_dp_int!r})"
+            return f"FloatFmt({self_float!r}, {self.min_dp!r})"
         else:
-            max_dp_int = int(self.max_dp)
-            return f"FloatFmt({self_float!r}, {min_dp_int!r}, {max_dp_int!r})"
+            return f"FloatFmt({self_float!r}, {self.min_dp!r}, {self.max_dp!r})"
 
 
 class AccountEdiCommon(models.AbstractModel):
@@ -184,6 +186,25 @@ class AccountEdiCommon(models.AbstractModel):
     # -------------------------------------------------------------------------
     # HELPERS
     # -------------------------------------------------------------------------
+
+    def _vals_to_etree(self, vals):
+        document_node = vals['document_node']
+        return dict_to_xml(document_node, nsmap=document_node['_nsmap'], template=document_node['_template'])
+
+    def _etree_to_string(self, tree):
+        return etree.tostring(tree, xml_declaration=True, encoding='UTF-8')
+
+    def _define_document_type(self, vals, document_type):
+        vals['_document_type'] = {
+            'name': document_type,
+            'model': self,
+        }
+
+    def _get_document_type(self, vals):
+        return vals.get('_document_type', {}).get('name')
+
+    def _is_document(self, vals, *document_types):
+        return self._get_document_type(vals) in document_types
 
     def module_installed(self, module_name):
         return self.env['ir.module.module']._get(module_name).state == 'installed'
@@ -273,7 +294,13 @@ class AccountEdiCommon(models.AbstractModel):
 
         cocontractant_note = self._get_belgian_cocontractant_note(customer, supplier)
         if cocontractant_note:
-            return create_dict(tax_category_code='AE', tax_exemption_reason_code='VATEX-EU-AE', tax_exemption_reason=cocontractant_note)
+            if not tax.amount:
+                return create_dict(
+                    tax_category_code='AE',
+                    tax_exemption_reason_code='VATEX-EU-AE',
+                    tax_exemption_reason=cocontractant_note
+                )
+            raise UserError(_("Invalid Tax Setup for Co-Contractor. Please apply the standard co-contractor tax, or ensure your custom tax uses a tax amount of 0"))
 
         if supplier.country_id == customer.country_id:
             if not tax or tax.amount == 0:
@@ -461,10 +488,13 @@ class AccountEdiCommon(models.AbstractModel):
                 'res_id': invoice.id,
             })
 
+        attachments = self._import_attachments(invoice, tree)
+        if attachments:
+            invoice.with_context(no_new_invoice=True).message_post(attachment_ids=attachments.ids)
+
         return True
 
     def _import_attachments(self, invoice, tree):
-        # Unused method, kept to avoid breaking stable
         # Import the embedded documents in the xml if some are found
         attachments = self.env['ir.attachment']
         if invoice.message_main_attachment_id:
@@ -472,6 +502,11 @@ class AccountEdiCommon(models.AbstractModel):
             return attachments
 
         attachments_data = attachments._extract_additional_documents(tree)
+        for data in attachments_data:
+            data.update({
+                'res_id': invoice.id,
+                'res_model': invoice._name,
+            })
         attachments = self.env['ir.attachment'].create(attachments_data)
         # Upon receiving an email (containing an xml) with a configured alias to create invoice, the xml is
         # set as the main_attachment. To be rendered in the form view, the pdf should be the main_attachment.

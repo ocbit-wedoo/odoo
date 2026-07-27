@@ -69,7 +69,7 @@ def _mock_pdp_annuaire_lookup_participant(func, self, edi_identification):
 
 
 def _mock_get_peppol_verification_state(func, self, peppol_endpoint, peppol_eas, invoice_edi_format):
-    if peppol_eas != '0225':
+    if peppol_eas != '0225' or self.env.company._get_peppol_proxy_type() != 'pdp':
         return func(self, peppol_endpoint, peppol_eas, invoice_edi_format)
     if not invoice_edi_format:
         return 'not_valid'
@@ -96,6 +96,11 @@ def _mock_l10n_fr_pdp_update_pilot_phase(func, self, value):
         self.sudo().l10n_fr_pdp_annuaire_start_date = fields.Date.to_date('2026-09-01')
 
 
+def _mock_button_trigger_authentication(func, self):
+    self.pdp_kyc_status = 'success'
+    return self._action_open_pdp_form()
+
+
 _demo_behaviour = {
     'button_account_peppol_check_partner_endpoint': _mock_button_verify_partner_endpoint,
     '_register_proxy_user': _mock_register_proxy_user,  # account_edi_proxy_client.user
@@ -104,6 +109,7 @@ _demo_behaviour = {
     '_pdp_annuaire_lookup_participant': _mock_pdp_annuaire_lookup_participant,  # res.partner
     '_get_peppol_verification_state': _mock_get_peppol_verification_state,  # res.partner
     '_l10n_fr_pdp_update_pilot_phase': _mock_l10n_fr_pdp_update_pilot_phase,  # res.company
+    'button_trigger_authentication': _mock_button_trigger_authentication,  # pdp.registration
 }
 
 # -------------------------------------------------------------------------
